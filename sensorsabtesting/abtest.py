@@ -15,7 +15,7 @@ from sensorsanalytics import SensorsAnalytics
 from sensorsabtesting.cache import LRUCache, TTLCache
 from datetime import datetime, timedelta
 
-SDK_VERSION = "0.0.1"
+SDK_VERSION = "0.0.2"
 VERSION_KEY = "abtest_lib_version"
 PLATFORM = "platform"
 PYTHON = "Python"
@@ -121,7 +121,7 @@ class SensorsABTest:
         param_name,
         default_value,
         enable_auto_track_event=True,
-        timeout_seconds=3,
+        timeout_seconds=3.0,
         custom_ids={},
         properties={},
     ):
@@ -156,7 +156,7 @@ class SensorsABTest:
         param_name,
         default_value,
         enable_auto_track_event=True,
-        timeout_seconds=3,
+        timeout_seconds=3.0,
         custom_ids={},
         properties={},
     ):
@@ -235,7 +235,7 @@ class SensorsABTest:
         param_name,
         default_value,
         enable_auto_track_event=True,
-        timeout_seconds=3,
+        timeout_seconds=3.0,
         custom_ids={},
         enable_cache=False,
         properties={},
@@ -263,7 +263,6 @@ class SensorsABTest:
         r_timeout = timeout_seconds
         if (
             not timeout_seconds
-            or not isinstance(timeout_seconds, int)
             or timeout_seconds <= 0
         ):
             r_timeout = 3

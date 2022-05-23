@@ -1,7 +1,8 @@
 # -*- coding: UTF-8 -*-
+import time
 import unittest
 
-
+from datetime import datetime
 from sensorsabtesting.abtest import *
 import sensorsanalytics
 
@@ -30,7 +31,6 @@ class NormalTest(unittest.TestCase):
             SensorsABTest(None, self.sa)
 
     def test_init(self):
-
         ab = SensorsABTest(AB_URL, sa=self.sa, enable_log=True)
         self.assertIsInstance(ab, SensorsABTest)
 
@@ -116,6 +116,37 @@ class NormalTest(unittest.TestCase):
             default_value=1,
         )
         self.assertEqual(r2.result, 1)
+
+    def test_timeout(self):
+        """
+        验证 timeout 超时情况
+        """
+        ab = SensorsABTest(
+            base_url="http://10.130.6.12:8202/api/v2/abtest/online/results?project-key=CB75FFDA4789BCDB46D40E0B7D8A6C1EA45A3539",
+            sa=self.sa, experiment_cache_time=1999, experiment_cache_size=18, event_cache_time=1,
+            event_cache_size=10, enable_event_cache=True, enable_log=True)
+        # 默认情况
+        result = ab.async_fetch_ab_test("AB1123456211", True, "number_test", 111, enable_auto_track_event=True)
+        self.assertIn(result.result, [166, 177])
+
+        # 设置很短时间的超时，默认使用默认值
+        result = ab.async_fetch_ab_test("AB112345611", True, "number_test", 111, enable_auto_track_event=True,
+                                        timeout_seconds=0.001)
+        self.assertEqual(111, result.result)
+
+    def test_timeout2(self):
+        """
+        验证 timeout，修改其默认值，将默认值设置成很大，验证 timeout 是否起作用
+        WSGI 服务器
+        """
+        ab = SensorsABTest("http://localhost:8000", self.sa)
+        star_time = time.time()
+        result = ab.async_fetch_ab_test("AB112345611", True, "number_test", 111, enable_auto_track_event=True,
+                                        timeout_seconds=10.0)
+        time_result = time.time() - star_time
+        self.assertEqual(111, result.result)
+        self.assertAlmostEqual(10, time_result, delta=1)
+
 
 
 if __name__ == "__main__":
