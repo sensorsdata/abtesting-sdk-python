@@ -6,10 +6,10 @@ from datetime import datetime
 from sensorsabtesting.abtest import *
 import sensorsanalytics
 
-SA_SERVER_URL = "http://10.120.240.69:8106/sa?project=customsubjectproject"
+SA_SERVER_URL = "https://sdkdebugtest.datasink.sensorsdata.cn/sa?project=default&token=cfb8b60e42e0ae9b"
 
-AB_URL = "http://10.120.103.57:8202/api/v2/abtest/online/results?project-key=03611F77720CB13DA4E8B726122D2EE2F95B7654"
-
+AB_URL = "http://10.129.128.84:8202/api/v2/abtest/online/results?project-key=F58146ECC1B9CD7524DCF3157E9480AB97CBC632"
+ERROR_AB_URL = "http://10.1291.128.84:8202/api/v2/abtest/online/results?project-key=F58146ECC1B9CD7524DCF3157E9480AB97CBC632"
 
 class NormalTest(unittest.TestCase):
     def setUp(self):
@@ -42,40 +42,11 @@ class NormalTest(unittest.TestCase):
         self.assertEqual(ab._experiment_cache_size, 4096)
 
     def test_event_cache_zero(self):
-        ab = SensorsABTest(AB_URL, self.sa, 0, 0, -2, 0)
+        ab = SensorsABTest(AB_URL, self.sa, -1, -1, -2, -1)
         self.assertEqual(ab._event_cache_time, 1440)
         self.assertEqual(ab._event_cache_size, 4096)
         self.assertEqual(ab._experiment_cache_time, 1440)
         self.assertEqual(ab._experiment_cache_size, 4096)
-
-    def test_async_error_params(self):
-        ab = SensorsABTest(AB_URL, self.sa, enable_log=True)
-        error_distinct_id = None
-        error_experiment_variable_name = ""
-        error_default_value = self.sa
-        r = ab.async_fetch_ab_test(
-            distinct_id=error_distinct_id,
-            is_login_id=False,
-            param_name="!!",
-            default_value=1,
-        )
-        self.assertEqual(r.result, 1)
-
-        r1 = ab.async_fetch_ab_test(
-            distinct_id="111",
-            is_login_id=False,
-            param_name=error_experiment_variable_name,
-            default_value=1,
-        )
-        self.assertEqual(r1.result, 1)
-
-        r2 = ab.async_fetch_ab_test(
-            distinct_id="111",
-            is_login_id=False,
-            param_name="1se",
-            default_value=error_default_value,
-        )
-        self.assertIsInstance(r2.result, SensorsAnalytics, "类型错误")
 
     def test_async_error_custom_ids(self):
         ids1 = {"": "b"}
@@ -117,35 +88,79 @@ class NormalTest(unittest.TestCase):
         )
         self.assertEqual(r2.result, 1)
 
+    def test_async_fetch_ab_test(self):
+        """
+        测试正常情况下的请求结果
+        :return:
+        """
+        ab = SensorsABTest(AB_URL, self.sa, enable_log=True)
+        # 默认情况
+        result = ab.async_fetch_ab_test("AB1123456211", True, "num_test", 100, enable_auto_track_event=True)
+        self.assertIn(result.result, [111, 222])
+        result = ab.async_fetch_ab_test("AB1123456211", True, "string_test", "unknown", enable_auto_track_event=True)
+        self.assertIn(result.result, ["hello", "world"])
+
+    def test_fast_fetch_ab_test(self):
+        """
+        测试正常情况下的请求结果
+        :return:
+        """
+        ab = SensorsABTest(AB_URL, self.sa, enable_log=True)
+        result = ab.fast_fetch_ab_test("AB1123456211", True, "num_test", 100, enable_auto_track_event=True)
+        self.assertIn(result.result, [111, 222])
+        result = ab.fast_fetch_ab_test("AB1123456211", True, "string_test", "unknown", enable_auto_track_event=True)
+        self.assertIn(result.result, ["hello", "world"])
+
+    def test_fast_fetch_ab_test_work(self):
+        """
+        验证两次 fast 请求之间的时间间隔
+        :return:
+        """
+        ab = SensorsABTest(AB_URL, self.sa, enable_log=True)
+        start_time = time.time()
+        result = ab.fast_fetch_ab_test("AB1123456211", True, "num_test", 100, enable_auto_track_event=True)
+        self.assertIn(result.result, [111, 222])
+        middle_time = time.time() - start_time
+        start_time = time.time()
+        result = ab.fast_fetch_ab_test("AB1123456211", True, "string_test", "unknown", enable_auto_track_event=True)
+        end_time = time.time()
+        self.assertIn(result.result, ["hello", "world"])
+        self.assertLess((end_time - start_time), middle_time / 3, "Does the cache is enabled?")
+        ab.close()
+
     def test_timeout(self):
         """
         验证 timeout 超时情况
         """
-        ab = SensorsABTest(
-            base_url="http://10.130.6.12:8202/api/v2/abtest/online/results?project-key=CB75FFDA4789BCDB46D40E0B7D8A6C1EA45A3539",
-            sa=self.sa, experiment_cache_time=1999, experiment_cache_size=18, event_cache_time=1,
-            event_cache_size=10, enable_event_cache=True, enable_log=True)
-        # 默认情况
-        result = ab.async_fetch_ab_test("AB1123456211", True, "number_test", 111, enable_auto_track_event=True)
-        self.assertIn(result.result, [166, 177])
+        ab = SensorsABTest(AB_URL, self.sa, enable_log=True)
+        result = ab.async_fetch_ab_test("AB1123456211", True, "string_test", "unknown",
+                                        enable_auto_track_event=False, timeout_seconds=0.01)
+        self.assertIn(result.result, "unknown")
 
-        # 设置很短时间的超时，默认使用默认值
-        result = ab.async_fetch_ab_test("AB112345611", True, "number_test", 111, enable_auto_track_event=True,
-                                        timeout_seconds=0.001)
-        self.assertEqual(111, result.result)
+        result = ab.async_fetch_ab_test("AB1123456211", True, "string_test", "unknown",
+                                        enable_auto_track_event=False,
+                                        timeout_seconds=urllib3.Timeout(connect=2, read=2))
+        self.assertIn(result.result, ["hello", "world"])
 
-    def test_timeout2(self):
+        result = ab.async_fetch_ab_test("AB1123456211", True, "string_test", "unknown",
+                                        enable_auto_track_event=False,
+                                        timeout_seconds=urllib3.Timeout(connect=1, read=0.01))
+        self.assertIn(result.result, "unknown")
+
+        ab.close()
+
+    def test_error_server_url(self):
         """
-        验证 timeout，修改其默认值，将默认值设置成很大，验证 timeout 是否起作用
-        WSGI 服务器
+        验证 server url 出现出去的场景
+        :return:
         """
-        ab = SensorsABTest("http://localhost:8000", self.sa)
-        star_time = time.time()
-        result = ab.async_fetch_ab_test("AB112345611", True, "number_test", 111, enable_auto_track_event=True,
-                                        timeout_seconds=10.0)
-        time_result = time.time() - star_time
-        self.assertEqual(111, result.result)
-        self.assertAlmostEqual(10, time_result, delta=1)
+        ab = SensorsABTest(ERROR_AB_URL, self.sa, enable_log=True)
+        result = ab.fast_fetch_ab_test("AB1123456211", True, "num_test", 100, enable_auto_track_event=True)
+        self.assertEqual(result.result, 100)
+        result = ab.async_fetch_ab_test("AB1123456211", True, "string_test", "unknown", enable_auto_track_event=True)
+        self.assertEqual(result.result, "unknown")
+        ab.close()
+
 
 
 

@@ -1,21 +1,15 @@
 # -*- coding: UTF-8 -*-
-import re
 import json
-
-from sensorsabtesting.ab_const import *
-
-try:
-    import urllib.request as urllib2
-except ImportError:
-    import urllib2
-
-
-from sensorsanalytics import SensorsAnalytics
-
-from sensorsabtesting.cache import LRUCache, TTLCache
+import re
 from datetime import datetime, timedelta
 
-SDK_VERSION = "0.0.2"
+import urllib3
+from sensorsanalytics import SensorsAnalytics
+
+from sensorsabtesting.ab_const import *
+from sensorsabtesting.cache import TTLCache
+
+SDK_VERSION = "0.0.3"
 VERSION_KEY = "abtest_lib_version"
 PLATFORM = "platform"
 PYTHON = "Python"
@@ -44,7 +38,6 @@ class SensorsABIllegalArgumentsException(SensorsABException):
 
 
 class SensorsABTest:
-
     NAME_PATTERN = re.compile(
         r"^((?!^distinct_id$|^original_id$|^time$|^properties$|^id$|^first_id$|^second_id$|^users$|^events$|^event$|^user_id$|^date$|^datetime$|^device_id$|^user_group|^user_tag|^[0-9])[a-zA-Z0-9_]{0,99})$",
         re.I,
@@ -56,15 +49,15 @@ class SensorsABTest:
     MAX_PROPERTY_LENGTH = 1024
 
     def __init__(
-        self,
-        base_url,
-        sa,
-        event_cache_time=1440,
-        event_cache_size=4096,
-        experiment_cache_size=4096,
-        experiment_cache_time=1440,
-        enable_event_cache=True,
-        enable_log=False,
+            self,
+            base_url,
+            sa,
+            event_cache_time=1440,
+            event_cache_size=4096,
+            experiment_cache_size=4096,
+            experiment_cache_time=1440,
+            enable_event_cache=True,
+            enable_log=False,
     ):
         """
         初始化 SDK
@@ -113,17 +106,19 @@ class SensorsABTest:
             self._event_cache_time, self._event_cache_size
         )
         self._track_day = None
+        # Proxy Setting: https://urllib3.readthedocs.io/en/stable/reference/urllib3.poolmanager.html#urllib3.ProxyManager
+        self.http_manager = urllib3.PoolManager(retries=False)
 
     def async_fetch_ab_test(
-        self,
-        distinct_id,
-        is_login_id,
-        param_name,
-        default_value,
-        enable_auto_track_event=True,
-        timeout_seconds=3.0,
-        custom_ids={},
-        properties={},
+            self,
+            distinct_id,
+            is_login_id,
+            param_name,
+            default_value,
+            enable_auto_track_event=True,
+            timeout_seconds=3.0,
+            custom_ids={},
+            properties={},
     ):
         """
         立即从服务端请求，忽略内存缓存
@@ -132,10 +127,16 @@ class SensorsABTest:
         :param param_name: 试验变量名称
         :param default_value: 未命中试验，返回默认值（支持数据类型：int｜bool｜str｜dict）
         :param enable_auto_track_event: 是否 SDK 自动触发事件
-        :param timeout_seconds:网络请求超时等待事件，单位为秒
+        :param timeout_seconds:网络请求超时等待事件，单位为秒，也可以是 urllib3.Timeout() 对象。
         :param custom_ids:自定义主体
         :param properties:自定义属性
         :return: Experiment
+
+        对于 timeout_seconds 参数，默认是 3 秒。
+        客户若想精确控制 connect 和 read 超时，请使用 urllib3.Timeout()。
+        下面是使用示::
+            >>> urllib3.Timeout(connect=1.0)
+            >>> urllib3.Timeout(connect=1.0, read=2.0)
         """
         return self.__fetch_ab(
             distinct_id,
@@ -150,15 +151,15 @@ class SensorsABTest:
         )
 
     def fast_fetch_ab_test(
-        self,
-        distinct_id,
-        is_login_id,
-        param_name,
-        default_value,
-        enable_auto_track_event=True,
-        timeout_seconds=3.0,
-        custom_ids={},
-        properties={},
+            self,
+            distinct_id,
+            is_login_id,
+            param_name,
+            default_value,
+            enable_auto_track_event=True,
+            timeout_seconds=3.0,
+            custom_ids={},
+            properties={},
     ):
         """
         优先从内存获取试验
@@ -167,10 +168,16 @@ class SensorsABTest:
         :param param_name: 试验变量名称
         :param default_value: 未命中试验，返回默认值（支持数据类型：int｜bool｜str｜dict）
         :param enable_auto_track_event: 是否 SDK 自动触发事件
-        :param timeout_seconds:网络请求超时等待事件，单位为秒
+        :param timeout_seconds:网络请求超时等待事件，单位为秒。也可以是 urllib3.Timeout() 对象。
         :param custom_ids:自定义主体
         :param properties:自定义属性
         :return: Experiment
+
+        对于 timeout_seconds 参数，默认是 3 秒。
+        客户若想精确控制 connect 和 read 超时，请使用 urllib3.Timeout()。
+        下面是使用示::
+            >>> urllib3.Timeout(connect=1.0)
+            >>> urllib3.Timeout(connect=1.0, read=2.0)
         """
         return self.__fetch_ab(
             distinct_id,
@@ -183,6 +190,9 @@ class SensorsABTest:
             True,
             properties,
         )
+
+    def close(self):
+        self.http_manager.clear()
 
     def track_ab_test_trigger(self, experiment, custom_ids=None, properties={}):
         """
@@ -203,10 +213,10 @@ class SensorsABTest:
             )
             return
         if self._event_cache.is_event_exist(
-            experiment.distinct_id,
-            experiment.is_login_id,
-            experiment.ab_experiment_id,
-            custom_ids,
+                experiment.distinct_id,
+                experiment.is_login_id,
+                experiment.ab_experiment_id,
+                custom_ids,
         ):
             SensorsABTest.ab_log("The event has been triggered.")
             return
@@ -229,26 +239,26 @@ class SensorsABTest:
             )
 
     def __fetch_ab(
-        self,
-        distinct_id,
-        is_login_id,
-        param_name,
-        default_value,
-        enable_auto_track_event=True,
-        timeout_seconds=3.0,
-        custom_ids={},
-        enable_cache=False,
-        properties={},
+            self,
+            distinct_id,
+            is_login_id,
+            param_name,
+            default_value,
+            enable_auto_track_event=True,
+            timeout_seconds=3.0,
+            custom_ids={},
+            enable_cache=False,
+            properties={},
     ):
         if not distinct_id or not isinstance(distinct_id, str):
             raise SensorsABIllegalArgumentsException("distinct_id is empty or not str")
         if not param_name or not isinstance(param_name, str):
             raise SensorsABIllegalArgumentsException("param_name is empty or not str")
         if not (
-            isinstance(default_value, int)
-            or isinstance(default_value, bool)
-            or isinstance(default_value, dict)
-            or isinstance(default_value, str)
+                isinstance(default_value, int)
+                or isinstance(default_value, bool)
+                or isinstance(default_value, dict)
+                or isinstance(default_value, str)
         ):
             SensorsABTest.ab_log(
                 "the type of defaultValue is not int,str,bool,dict return default value"
@@ -261,11 +271,11 @@ class SensorsABTest:
                 distinct_id, is_login_id=is_login_id, result=default_value
             )
         r_timeout = timeout_seconds
-        if (
-            not timeout_seconds
-            or timeout_seconds <= 0
-        ):
+        if not timeout_seconds:
             r_timeout = 3
+        elif isinstance(timeout_seconds, (int, float)) and timeout_seconds <= 0:
+            r_timeout = 3
+
         if enable_cache:
             experiment = self._experiment_cache_manager.get_cache_experiment_result(
                 distinct_id, is_login_id, custom_ids, param_name
@@ -307,12 +317,12 @@ class SensorsABTest:
         return result
 
     def __convert_experiment(
-        self,
-        experiment,
-        distinct_id,
-        is_login_id,
-        param_name,
-        default_value,
+            self,
+            experiment,
+            distinct_id,
+            is_login_id,
+            param_name,
+            default_value,
     ):
         r_experiment = Experiment(
             distinct_id, is_login_id=is_login_id, result=default_value
@@ -362,13 +372,13 @@ class SensorsABTest:
                     return None
 
     def __getABTestByHttp(
-        self,
-        distinct_id,
-        is_login_id,
-        timeout_seconds,
-        custom_ids,
-        properties,
-        experiment_name,
+            self,
+            distinct_id,
+            is_login_id,
+            timeout_seconds,
+            custom_ids,
+            properties,
+            experiment_name,
     ):
         request_params = {}
         if is_login_id:
@@ -386,17 +396,17 @@ class SensorsABTest:
             request_params["param_name"] = experiment_name
         response = self.__do_request(request_params, timeout_seconds)
         if response:
-            ret_code = response.code
+            ret_code = response.status
             SensorsABTest.ab_log("SAABTesting request code = " + str(ret_code))
             if 200 <= ret_code <= 300:
-                http_res = response.read().decode("utf-8")
+                http_res = response.data.decode("utf-8")
                 SensorsABTest.ab_log("SAABTesting request message = " + http_res)
                 http_res_dict = SensorsABTest._json_loads_byteified(http_res)
                 if (
-                    http_res_dict
-                    and STATUS_KEY in http_res_dict
-                    and SUCCESS == http_res_dict[STATUS_KEY]
-                    and RESULTS_KEY in http_res_dict
+                        http_res_dict
+                        and STATUS_KEY in http_res_dict
+                        and SUCCESS == http_res_dict[STATUS_KEY]
+                        and RESULTS_KEY in http_res_dict
                 ):
                     return http_res_dict
         return None
@@ -436,11 +446,11 @@ class SensorsABTest:
     def __do_request(self, request_params, timeout_seconds):
         try:
             json_data = json.dumps(request_params)
-            a = json_data.encode("utf-8")
-            request = urllib2.Request(
-                url=self._base_url, data=a, headers={"Content-type": "application/json"}
-            )
-            response = urllib2.urlopen(request, timeout=timeout_seconds)
+            encoded_data = json_data.encode("utf-8")
+            response = self.http_manager.request('POST', self._base_url, body=encoded_data,
+                                                 headers={"Content-type": "application/json",
+                                                          "Connection": "keep-alive"},
+                                                 timeout=timeout_seconds)
         except Exception as e:
             print(e)
             return None
@@ -475,13 +485,13 @@ class SensorsABTest:
         if result is None:
             return
         if (
-            result.is_white_list is None
-            or result.is_white_list
-            or result.ab_experiment_id is None
+                result.is_white_list is None
+                or result.is_white_list
+                or result.ab_experiment_id is None
         ):
             return
         if self._event_cache.is_event_exist(
-            result.distinct_id, result.is_login_id, result.ab_experiment_id, custom_ids
+                result.distinct_id, result.is_login_id, result.ab_experiment_id, custom_ids
         ):
             return
         properties = {}
@@ -527,11 +537,11 @@ class SensorsABTest:
                     "The property name %s is invalid format" % str(key)
                 )
             if not (
-                isinstance(value, int)
-                or isinstance(value, float)
-                or isinstance(value, str)
-                or isinstance(value, bool)
-                or isinstance(value, list)
+                    isinstance(value, int)
+                    or isinstance(value, float)
+                    or isinstance(value, str)
+                    or isinstance(value, bool)
+                    or isinstance(value, list)
             ):
                 raise SensorsABIllegalDataException(
                     "The property name %s should be a basic type: float, str, bool, list."
@@ -554,14 +564,14 @@ class SensorsABTest:
 
 class Experiment:
     def __init__(
-        self,
-        distinct_id,
-        is_login_id,
-        result=None,
-        ab_experiment_id=None,
-        ab_experiment_group_id=None,
-        is_control_group=None,
-        is_white_list=None,
+            self,
+            distinct_id,
+            is_login_id,
+            result=None,
+            ab_experiment_id=None,
+            ab_experiment_group_id=None,
+            is_control_group=None,
+            is_white_list=None,
     ):
         self.distinct_id = distinct_id
         self.is_login_id = is_login_id
@@ -573,17 +583,17 @@ class Experiment:
 
     def __str__(self):
         return (
-            "distinct_id = %s,is_login_id = %s,result = %s,ab_experiment_id = %s,ab_experiment_group_id = %s,"
-            "is_control_group = %s,is_white_list = %s"
-            % (
-                self.distinct_id,
-                self.is_login_id,
-                self.result,
-                self.ab_experiment_id,
-                self.ab_experiment_group_id,
-                self.is_control_group,
-                self.is_white_list,
-            )
+                "distinct_id = %s,is_login_id = %s,result = %s,ab_experiment_id = %s,ab_experiment_group_id = %s,"
+                "is_control_group = %s,is_white_list = %s"
+                % (
+                    self.distinct_id,
+                    self.is_login_id,
+                    self.result,
+                    self.ab_experiment_id,
+                    self.ab_experiment_group_id,
+                    self.is_control_group,
+                    self.is_white_list,
+                )
         )
 
 
@@ -597,10 +607,10 @@ class EventCacheManager:
     def is_event_exist(self, distinct_id, is_login_id, ab_experiment_id, custom_ids):
         if hasattr(self, "_cache"):
             return (
-                self.__generate_key(
-                    distinct_id, is_login_id, ab_experiment_id, custom_ids
-                )
-                in self._cache
+                    self.__generate_key(
+                        distinct_id, is_login_id, ab_experiment_id, custom_ids
+                    )
+                    in self._cache
             )
         else:
             return False
@@ -625,7 +635,7 @@ class ExperimentCacheManager:
             )
 
     def get_cache_experiment_result(
-        self, distinct_id, is_login, custom_ids, experiment_name
+            self, distinct_id, is_login, custom_ids, experiment_name
     ):
         if hasattr(self, "_experiment_result_cache"):
             key = self.__generate_key(distinct_id, is_login, custom_ids)
@@ -641,7 +651,7 @@ class ExperimentCacheManager:
         return None
 
     def set_cache_experiment_result(
-        self, distinct_id, is_login_id, custom_ids, experiment
+            self, distinct_id, is_login_id, custom_ids, experiment
     ):
         if hasattr(self, "_experiment_result_cache"):
             key = self.__generate_key(distinct_id, is_login_id, custom_ids)
@@ -649,3 +659,4 @@ class ExperimentCacheManager:
 
     def __generate_key(self, distinct_id, is_login, custom_ids):
         return distinct_id + "_" + str(is_login) + "_" + str(custom_ids)
+
